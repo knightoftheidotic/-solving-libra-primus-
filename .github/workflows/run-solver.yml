@@ -1,0 +1,101 @@
+
+name: Run Cryptography Solver
+
+# Manual trigger - press "Run workflow" on GitHub UI
+on:
+  workflow_dispatch:
+    inputs:
+      use_tor:
+        description: 'Run using Tor on a self-hosted runner (DO NOT enable on public hosted runners)'
+        required: false
+        default: '0'
+
+jobs:
+  run-solver:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+
+      - name: Show environment
+        run: |
+          echo "WORKING_DIR=${{ github.workspace }}" 
+          echo "MAX_WORKERS=${{ runner.otel ? 2 : 4 }}" || true
+
+      - name: Run solver
+        env:
+          WORKING_DIR: ${{ github.workspace }}
+        run: |
+          python run_hash_solver.py
+
+      - name: Run tests
+        run: |
+          python -m pytest -q || true
+
+      - name: Upload outputs (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: solver-output
+          path: out/
+          retention-days: 30
+
+  # Optional self-hosted job for Tor usage. This job only runs when the
+  # workflow input `use_tor` is set to '1' and the repository operator has
+  # a self-hosted runner available. This prevents Tor from being started on
+  # public GitHub-hosted runners and keeps usage legal/safe.
+  run-solver-selfhosted:
+    if: ${{ github.event.inputs.use_tor == '1' }}
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Caution about Tor
+        run: |
+          echo "*** CAUTION: Tor will only be started on self-hosted runners you control. ***"
+          echo "Do NOT enable this on public/shared CI without authorization."
+
+      - name: Install Tor (self-hosted runner)
+        run: |
+          # Attempt to install tor on Debian/Ubuntu-based self-hosted runners.
+          # If your self-hosted runner uses a different distro, adapt this step.
+          sudo apt-get update && sudo apt-get install -y tor || true
+
+      - name: Start Tor in background
+        run: |
+          # Start Tor as a background process. On some systems you may prefer
+          # `sudo systemctl start tor` or running tor with a dedicated config.
+          tor &
+          sleep 5
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+
+      - name: Run solver (with USE_TOR=1)
+        env:
+          WORKING_DIR: ${{ github.workspace }}
+          USE_TOR: '1'
+        run: |
+          python run_hash_solver.py
+
+      - name: Upload outputs (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: solver-output-tor
+          path: out/
+          retention-days: 30
+
