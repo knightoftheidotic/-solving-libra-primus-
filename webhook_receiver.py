@@ -49,6 +49,54 @@ class WebhookHandler(BaseHTTPRequestHandler):
         with open(payload_file, "wb") as f:
             f.write(body)
 
+        # Try to parse JSON payload and extract SHA256-like hashes (safe local operation).
+        try:
+            import json
+            from tools.parse_hashes import extract_hashes_from_text
+
+            text = None
+            try:
+                obj = json.loads(body.decode("utf-8", errors="ignore"))
+                # Look for common fields that may contain the message content
+                if isinstance(obj, dict):
+                    # Check several candidate fields
+                    for field in ("content", "message", "text", "body", "payload"):
+                        if field in obj and isinstance(obj[field], str):
+                            text = obj[field]
+                            break
+                    # Otherwise, stringify the full object
+                    if text is None:
+                        text = json.dumps(obj)
+                else:
+                    text = str(obj)
+            except Exception:
+                # Not JSON or parse failed — fall back to raw body text
+                text = body.decode("utf-8", errors="ignore")
+
+            hashes = extract_hashes_from_text(text)
+            if hashes:
+                inputs_dir = os.path.join(os.getcwd(), "inputs")
+                os.makedirs(inputs_dir, exist_ok=True)
+                hashes_file = os.path.join(inputs_dir, "hashes.txt")
+                # Read existing hashes and append any new unique ones
+                existing = set()
+                if os.path.exists(hashes_file):
+                    with open(hashes_file, "r", encoding="utf-8", errors="ignore") as fh:
+                        for ln in fh:
+                            ln = ln.strip().lower()
+                            if ln:
+                                existing.add(ln)
+                appended = []
+                with open(hashes_file, "a", encoding="utf-8") as fh:
+                    for h in hashes:
+                        if h not in existing:
+                            fh.write(h + "\n")
+                            appended.append(h)
+                if appended:
+                    print(f"Appended {len(appended)} new hash(es) to {hashes_file}: {appended}")
+        except Exception as e:
+            print("Hash extraction failed:", e)
+
         # Optionally trigger the solver on signed webhooks. This is gated by
         # environment variables to avoid accidental network activity.
         # Requirements to trigger:
