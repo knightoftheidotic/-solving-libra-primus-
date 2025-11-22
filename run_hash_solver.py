@@ -32,6 +32,160 @@ def compute_sha256(s: bytes) -> str:
     return hashlib.sha256(s).hexdigest()
 
 
+def compute_merkle_root_and_proofs(leaf_hashes: list[str]) -> tuple[str, dict]:
+    """Build a binary Merkle tree from a list of hex leaf hashes (SHA-256 hex strings).
+
+    Returns (root_hex, proofs) where proofs maps leaf_hash -> proof list.
+    Proof list is a list of (sibling_hash, direction) where direction is 'L' or 'R'.
+    """
+    # Helper: ensure we are working with bytes internally
+    def hex_to_bytes(h: str) -> bytes:
+        return bytes.fromhex(h)
+
+    def bytes_to_hex(b: bytes) -> str:
+        return b.hex()
+
+    # Start with list of bytes
+    level = [hex_to_bytes(h) for h in leaf_hashes]
+    # Keep track of proofs: map leaf index to list of (sibling_hex, dir)
+    proofs_by_index = {i: [] for i in range(len(level))}
+
+    if not level:
+        return "", {}
+
+    # Build the tree upward
+    while len(level) > 1:
+        next_level = []
+        # If odd number of nodes, duplicate last
+        if len(level) % 2 == 1:
+            level.append(level[-1])
+        for i in range(0, len(level), 2):
+            left = level[i]
+            right = level[i + 1]
+            # For each child leaf beneath left/right, append sibling info
+            # We need to propagate proofs: find all original leaf indices covered by these nodes
+            # To do this efficiently we track index ranges implicitly by rebuilding mapping each round.
+            # But simpler: reconstruct the mapping of indices to node positions each round.
+            parent = hashlib.sha256(left + right).digest()
+            next_level.append(parent)
+        # After building next_level, compute new proofs for leaves by pairing
+        # Recompute mapping from leaf index -> node at current level
+        # We'll reconstruct levels from leaves each loop to attach proofs correctly.
+        # Simpler approach: perform a separate loop to attach sibling for each pair at this level.
+        for i in range(0, len(level), 2):
+            left_hex = bytes_to_hex(level[i])
+            right_hex = bytes_to_hex(level[i + 1])
+            # Determine which original leaf indices contributed to level[i] and level[i+1]
+            # We'll map leaf indices to their current node by chunking the leaves according to tree width.
+            # Calculate chunk size: number of original leaves represented by one node at this level
+            # Number of nodes at this level = len(level)
+            # chunk_size = total_leaves / number_of_nodes
+            # But since we duplicated when odd, we can instead simulate by building grouping from original leaves.
+            pass
+
+    # The above while loop is simplified but proof construction needs a clearer implementation.
+    # To keep implementation correct and simple, rebuild a full tree structure with nodes tracking leaf index ranges.
+    # Implement a proper tree builder below.
+
+
+def _build_merkle_tree_with_proofs(leaf_hashes: list[str]) -> tuple[str, dict]:
+    """Robust Merkle builder that returns (root_hex, proofs) mapping leaf_hash -> proof list.
+
+    Proof list contains tuples (sibling_hex, direction) where direction is 'L' if sibling is left of node,
+    'R' if sibling is right of node. Uses SHA-256(left || right) as parent hash.
+    """
+    if not leaf_hashes:
+        return "", {}
+
+    import math
+
+    # Node structure: dict with keys {hash: bytes, leaves: list of leaf indices}
+    nodes = [ { 'hash': bytes.fromhex(h), 'leaves': [i] } for i,h in enumerate(leaf_hashes) ]
+
+    # proofs_by_leaf_index: list of lists
+    proofs = { i: [] for i in range(len(leaf_hashes)) }
+
+    while len(nodes) > 1:
+        if len(nodes) % 2 == 1:
+            # duplicate last
+            nodes.append({'hash': nodes[-1]['hash'], 'leaves': nodes[-1]['leaves'][:]})
+        next_nodes = []
+        for i in range(0, len(nodes), 2):
+            left = nodes[i]
+            right = nodes[i+1]
+            # For each leaf index under left, its sibling is right
+            for li in left['leaves']:
+                proofs[li].append( (right['hash'].hex(), 'R') )
+            for ri in right['leaves']:
+                proofs[ri].append( (left['hash'].hex(), 'L') )
+            parent_hash = hashlib.sha256(left['hash'] + right['hash']).digest()
+            parent_node = { 'hash': parent_hash, 'leaves': left['leaves'] + right['leaves'] }
+            next_nodes.append(parent_node)
+        nodes = next_nodes
+
+    root_hex = nodes[0]['hash'].hex()
+    # Convert proofs mapping from index keys to leaf-hash keys
+    proofs_by_leaf_hash = {}
+    for idx, proof_list in proofs.items():
+        proofs_by_leaf_hash[ leaf_hashes[idx] ] = proof_list
+    return root_hex, proofs_by_leaf_hash
+
+
+def verify_merkle_proof(leaf_hex: str, proof: list[tuple[str, str]], root_hex: str) -> bool:
+    """Verify a Merkle proof for a leaf (hex strings). Proof is list of (sibling_hex, direction).
+
+    direction 'L' means sibling is left of the node, 'R' means sibling is right.
+    """
+    cur = bytes.fromhex(leaf_hex)
+    for sibling_hex, direction in proof:
+        sibling = bytes.fromhex(sibling_hex)
+        if direction == 'L':
+            cur = hashlib.sha256(sibling + cur).digest()
+        else:
+            cur = hashlib.sha256(cur + sibling).digest()
+    return cur.hex() == root_hex
+
+
+def build_and_save_merkle(wordlist: list[str], targets: list[str], out_dir: Path):
+    """Build Merkle tree from wordlist (leaves = SHA256(word)), save root and proofs, and record matches.
+
+    Writes `out/merkle_root.txt`, `out/merkle_proofs.json`, and `out/merkle_matches.json`.
+    Returns (root_hex, proofs, matches).
+    """
+    # Compute leaf hashes in order
+    leaf_hashes = [ compute_sha256(w.encode('utf-8')) for w in wordlist ]
+    root_hex, proofs = _build_merkle_tree_with_proofs(leaf_hashes)
+
+    # Save root and proofs
+    (out_dir / 'merkle_root.txt').write_text(root_hex, encoding='utf-8')
+    (out_dir / 'merkle_proofs.json').write_text(json.dumps(proofs, indent=2), encoding='utf-8')
+
+    # Check targets against leaves and root
+    matches = {}
+    leaf_set = set(leaf_hashes)
+    for t in targets:
+        t_clean = t.strip().lower()
+        if not t_clean:
+            continue
+        if t_clean == root_hex:
+            matches[t_clean] = { 'type': 'root' }
+        elif t_clean in leaf_set:
+            # include plaintext and proof
+            idx = leaf_hashes.index(t_clean)
+            plaintext = wordlist[idx]
+            proof = proofs.get(t_clean, [])
+            # verify proof sanity
+            ok = verify_merkle_proof(t_clean, proof, root_hex)
+            matches[t_clean] = { 'type': 'leaf', 'plaintext': plaintext, 'proof': proof, 'verified': ok }
+        else:
+            # no match
+            pass
+
+    (out_dir / 'merkle_matches.json').write_text(json.dumps(matches, indent=2), encoding='utf-8')
+    return root_hex, proofs, matches
+
+
+
 def load_lines(path: Path):
     if not path.exists():
         return []
@@ -171,8 +325,28 @@ def main():
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run local hash solver and optional Merkle tree build")
+    parser.add_argument("--merkle", action="store_true", help="Build Merkle tree (SHA-256) from wordlist and save proofs")
+    args = parser.parse_args()
+
     try:
         rc = main()
+
+        if args.merkle:
+            # Load wordlist and targets again (solver_main already wrote results)
+            repo_root = Path(os.environ.get("WORKING_DIR", os.getcwd()))
+            inputs_dir = repo_root / "inputs"
+            hashes_path = inputs_dir / "hashes.txt"
+            wordlist_path = inputs_dir / "wordlist.txt"
+            hashes = load_lines(hashes_path)
+            wordlist = load_lines(wordlist_path)
+            out_dir = repo_root / "out"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            root_hex, proofs, matches = build_and_save_merkle(wordlist, hashes, out_dir)
+            print(f"Merkle root: {root_hex}")
+
         sys.exit(rc)
     except Exception as e:
         print("Error running solver:", e)
