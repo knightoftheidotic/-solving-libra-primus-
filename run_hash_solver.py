@@ -70,7 +70,8 @@ def solver_main():
 
     results_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(f"Wrote results to {results_path}")
-    return 0
+    # Return results and candidate_map for further processing by caller
+    return results, candidate_map, results_path
 
 
 def network_fetch_example():
@@ -129,7 +130,29 @@ def main():
         print("USE_TOR=1 detected. This script will NOT perform network actions.")
         print("If you intend to route traffic through Tor, run this on a self-hosted runner and supervise Tor there.")
 
-    return solver_main()
+    # Run the local solver first
+    solver_out = solver_main()
+
+    # If network fetch is enabled, perform a guarded fetch and compute its hash
+    if os.environ.get("ENABLE_NETWORK", "0").strip() == "1":
+        fetched_path = network_fetch_example()
+        if fetched_path and fetched_path.exists():
+            data = fetched_path.read_bytes()
+            net_hash = compute_sha256(data).lower()
+            print(f"Network fetch SHA256: {net_hash}")
+
+            # Update results.json if possible
+            try:
+                results, candidate_map, results_path = solver_out
+                found = candidate_map.get(net_hash)
+                results[net_hash] = found
+                results_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
+                print(f"Appended network fetch result to {results_path}")
+            except Exception as e:
+                print("Could not update results.json with network fetch hash:", e)
+
+    # Exit successfully; all network actions are opt-in and require env vars.
+    return 0
 
 
 if __name__ == "__main__":
