@@ -2,5 +2,8 @@
 pytest
 # Optional cryptography dep for advanced crypto operations (not required for local solver)
 cryptography>=40.0.0
+# For network/Tor fetches (optional). Install only when enabling network features.
+requests[socks]
+
 
 

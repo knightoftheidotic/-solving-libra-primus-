@@ -22,6 +22,11 @@ import os
 import sys
 from pathlib import Path
 
+try:
+    import requests
+except Exception:
+    requests = None
+
 
 def compute_sha256(s: bytes) -> str:
     return hashlib.sha256(s).hexdigest()
@@ -66,6 +71,55 @@ def solver_main():
     results_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(f"Wrote results to {results_path}")
     return 0
+
+
+def network_fetch_example():
+    """Example network fetch that is only enabled when explicitly allowed.
+
+    To enable network fetches the following environment variables must be set:
+      - ENABLE_NETWORK=1
+      - USE_TOR=1 (recommended) or USE_TOR=0 (direct)
+      - TOR_SOCKS_PROXY (optional) default: socks5h://127.0.0.1:9050
+
+    This function is a guarded example and does not run by default.
+    """
+    en = os.environ.get("ENABLE_NETWORK", "0").strip()
+    if en != "1":
+        print("Network access is disabled (ENABLE_NETWORK!=1). Skipping network fetch.")
+        return None
+
+    if requests is None:
+        print("`requests` not installed; cannot perform network fetch")
+        return None
+
+    use_tor = os.environ.get("USE_TOR", "0").strip()
+    proxy = os.environ.get("TOR_SOCKS_PROXY", "socks5h://127.0.0.1:9050")
+
+    url = os.environ.get("NETWORK_FETCH_URL")
+    if not url:
+        print("No NETWORK_FETCH_URL set; aborting network fetch")
+        return None
+
+    session = requests.Session()
+    if use_tor == "1":
+        session.proxies.update({"http": proxy, "https": proxy})
+        print(f"Fetching via Tor proxy {proxy}: {url}")
+    else:
+        print(f"Fetching directly (non-Tor): {url}")
+
+    try:
+        r = session.get(url, timeout=30)
+        r.raise_for_status()
+        print(f"Fetched {len(r.content)} bytes")
+        # Save a copy for inspection
+        out_dir = Path("out")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        p = out_dir / "network_fetch.bin"
+        p.write_bytes(r.content)
+        return p
+    except Exception as e:
+        print("Network fetch failed:", e)
+        return None
 
 
 def main():

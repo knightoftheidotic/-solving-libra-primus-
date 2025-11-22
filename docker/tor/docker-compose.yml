@@ -1,0 +1,13 @@
+version: '3.8'
+services:
+  tor:
+    build: .
+    container_name: tor-proxy
+    restart: unless-stopped
+    ports:
+      - "9050:9050" # SOCKS5 proxy
+    volumes:
+      - tor-data:/var/lib/tor
+
+volumes:
+  tor-data:
