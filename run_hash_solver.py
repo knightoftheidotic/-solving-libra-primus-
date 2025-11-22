@@ -57,8 +57,23 @@ def solver_main():
     out_dir.mkdir(parents=True, exist_ok=True)
     results_path = out_dir / "results.json"
 
-    # Create mapping of candidate hash -> plaintext for quick lookup
-    candidate_map = {compute_sha256(w.encode("utf-8")): w for w in wordlist}
+    # Create mapping of candidate hash -> plaintext for quick lookup.
+    # Support multiple common hash algorithms (SHA256 and SHA512) so the
+    # solver can match hashes of either length.
+    candidate_map = {}
+    for w in wordlist:
+        b = w.encode("utf-8")
+        h256 = compute_sha256(b)
+        candidate_map[h256] = w
+        # SHA512 mapping (128 hex chars)
+        try:
+            import hashlib as _hashlib
+
+            h512 = _hashlib.sha512(b).hexdigest()
+            candidate_map[h512] = w
+        except Exception:
+            # If hashlib doesn't support sha512 for some reason, skip it
+            pass
 
     results = {}
     for h in hashes:
