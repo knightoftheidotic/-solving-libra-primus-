@@ -15,6 +15,8 @@ if ($Hash) {
     & .\tools\run_with_hash.ps1 -Hash $Hash
     Write-Host "Verifying proof for $Hash"
     & $py tools/verify_merkle.py --match-key $Hash
+        Write-Host "Extracting URLs from outputs..."
+        & $py tools/extract_urls.py
 } else {
     Write-Host "Running solver without modifying inputs/hashes.txt"
     & .\tools\run_with_hash.ps1
@@ -27,6 +29,8 @@ if ($Hash) {
             Write-Host "Verifying match: $k"
             & $py tools/verify_merkle.py --match-key $k
         }
+            Write-Host "Extracting URLs from outputs..."
+            & $py tools/extract_urls.py
     } else {
         Write-Warning "No matches file found at $matchesFile"
     }
