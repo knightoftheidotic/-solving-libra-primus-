@@ -43,10 +43,43 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self.wfile.write(b"Invalid signature")
             return
 
-        # Process payload safely: here we just acknowledge and write to out/
+        # Process payload safely: write to out/ for auditing
         os.makedirs("out", exist_ok=True)
-        with open("out/webhook_payload.bin", "wb") as f:
+        payload_file = "out/webhook_payload.bin"
+        with open(payload_file, "wb") as f:
             f.write(body)
+
+        # Optionally trigger the solver on signed webhooks. This is gated by
+        # environment variables to avoid accidental network activity.
+        # Requirements to trigger:
+        #   - PROCESS_WEBHOOK must be '1'
+        #   - ENABLE_NETWORK must be '1' (network fetches are opt-in)
+        #   - WEBHOOK_TRIGGER_CMD may specify a command to run (default runs run_hash_solver.py)
+        process_webhook = os.environ.get("PROCESS_WEBHOOK", "0").strip()
+        enable_network = os.environ.get("ENABLE_NETWORK", "0").strip()
+        trigger_cmd = os.environ.get("WEBHOOK_TRIGGER_CMD", "python3 run_hash_solver.py")
+
+        if process_webhook == "1":
+            if enable_network != "1":
+                print("PROCESS_WEBHOOK=1 set but ENABLE_NETWORK!=1; skipping network-enabled solver trigger")
+            else:
+                # Run the trigger command in a safe subprocess and capture output
+                try:
+                    import shlex
+                    cmd = shlex.split(trigger_cmd)
+                    # Provide environment to subprocess: inherit current env
+                    env = os.environ.copy()
+                    env["WORKING_DIR"] = os.getcwd()
+                    print(f"Triggering solver via: {trigger_cmd}")
+                    import subprocess
+                    p = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
+                    with open("out/webhook_solver_stdout.log", "wb") as so:
+                        so.write(p.stdout or b"")
+                    with open("out/webhook_solver_stderr.log", "wb") as se:
+                        se.write(p.stderr or b"")
+                    print(f"Solver trigger exited {p.returncode}")
+                except Exception as e:
+                    print("Failed to trigger solver:", e)
 
         self.send_response(200)
         self.end_headers()

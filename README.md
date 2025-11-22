@@ -39,5 +39,32 @@ python3 webhook_receiver.py --port 9000
 ```
 
 If you want to enable network or Tor features, read `docs/TOR_HARDENING.md` and only enable them on self-hosted machines you control.
+
+Webhook-triggered solver (testing)
+
+This repo provides tools to test webhook-triggered runs locally.
+
+1. Start the webhook receiver in one terminal:
+
+```bash
+export WEBHOOK_SECRET="test-secret"
+python3 webhook_receiver.py --port 9000
+```
+
+2. In another terminal, send a signed test webhook (this will only trigger the
+	solver if `PROCESS_WEBHOOK=1` and `ENABLE_NETWORK=1` environment variables are set):
+
+```bash
+export WEBHOOK_SECRET="test-secret"
+export ENABLE_NETWORK=1
+export PROCESS_WEBHOOK=1
+# (recommended) use Tor container and set USE_TOR=1 and TOR_SOCKS_PROXY accordingly
+export USE_TOR=0
+./tools/send_test_webhook.sh 9000
+```
+
+3. Inspect `out/` for `webhook_payload.bin`, `webhook_solver_stdout.log`, `webhook_solver_stderr.log`, and `results.json`.
+
+The signing helper is at `tools/sign_webhook.py` and the test webhook sender is `tools/send_test_webhook.sh`.
 # -solving-libra-primus-
  I am working on the dots on one of the pages 
