@@ -25,10 +25,14 @@ NOTES
 #>
 
 param(
-    [int]$Port = 9000,
-    [string]$PayloadFile = "tools/test_payload.json",
-    [switch]$UseTor
+  [int]$Port = 9000,
+  [string]$PayloadFile = "tools/test_payload.json",
+  [switch]$UseTor,
+  [string]$Hash = ""
 )
+
+# If set, write the supplied hash directly to inputs/hashes.txt and run the solver locally.
+[switch]$AddDirectly = $false
 
 function Show-Header($s) { Write-Host "`n=== $s ===`n" -ForegroundColor Cyan }
 
@@ -52,10 +56,51 @@ Write-Host "USE_TOR=$($env:USE_TOR)"
 
 Show-Header "Ensure payload exists"
 if (-Not (Test-Path $PayloadFile)) {
-    Write-Host "Creating sample payload at $PayloadFile"
-    New-Item -ItemType Directory -Force -Path (Split-Path $PayloadFile) | Out-Null
-    @'{"test":"webhook","ts":0}'@ | Out-File -Encoding utf8 -FilePath $PayloadFile
+  New-Item -ItemType Directory -Force -Path (Split-Path $PayloadFile) | Out-Null
 }
+
+# If AddDirectly is set, append the provided hash to inputs/hashes.txt (deduplicated)
+if ($AddDirectly -and $Hash -ne "") {
+  Show-Header "Adding hash directly to inputs/hashes.txt"
+  $inputsDir = "inputs"
+  if (-Not (Test-Path $inputsDir)) { New-Item -ItemType Directory -Force -Path $inputsDir | Out-Null }
+  $hashesFile = Join-Path $inputsDir "hashes.txt"
+  $existing = @()
+  if (Test-Path $hashesFile) { $existing = Get-Content -Path $hashesFile -ErrorAction SilentlyContinue }
+  $hLower = $Hash.ToLower()
+  if ($existing -notcontains $hLower) {
+    Add-Content -Path $hashesFile -Value $hLower
+    Write-Host "Appended hash to $hashesFile: $hLower"
+  } else {
+    Write-Host "Hash already present in $hashesFile"
+  }
+
+  # Run the solver directly and show outputs
+  Show-Header "Running solver directly"
+  & python run_hash_solver.py
+  Show-Header "Outputs in out/"
+  if (Test-Path out) {
+    Get-ChildItem -Path out | ForEach-Object {
+      Write-Host "-- $($_.Name) --"
+      try { Get-Content -Raw -Path $_.FullName | Write-Host } catch { Write-Host "(binary or unreadable)" }
+    }
+  } else {
+    Write-Host "No out/ directory found"
+  }
+
+  Write-Host "Done (direct add + solver run). Exiting."
+  return
+}
+
+# Build payload. If a hash was provided, include it in the `content` field so the webhook
+# receiver will extract it and add it to `inputs/hashes.txt`.
+$payloadObj = @{ test = "webhook"; ts = 0 }
+if ($Hash -ne "") {
+  $payloadObj.content = "Found puzzle hash: $Hash"
+}
+$json = $payloadObj | ConvertTo-Json -Compress
+$json | Out-File -Encoding utf8 -FilePath $PayloadFile
+Write-Host "Created payload at $PayloadFile: $json"
 
 Show-Header "Starting webhook receiver"
 # Start the webhook server; it will inherit the env vars set above

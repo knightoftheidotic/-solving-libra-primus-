@@ -1,0 +1,21 @@
+{
+  "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824": {
+    "type": "leaf",
+    "plaintext": "hello",
+    "proof": [
+      [
+        "d7ecdf25eaf3deba0f2628771dbdd22d4138ab6cf38f91ed02a2ca0dec7c8ab7",
+        "L"
+      ],
+      [
+        "a9e049081e9eaeef2d30029031314c888955d7181a032c29b11633ac11d6076c",
+        "R"
+      ],
+      [
+        "f02a823d95dbd5ceebff9c3034379eb37cddec521f1689008728acb792809c10",
+        "L"
+      ]
+    ],
+    "verified": true
+  }
+}
