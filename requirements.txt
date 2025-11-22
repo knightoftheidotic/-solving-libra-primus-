@@ -1,3 +1,6 @@
 # Add real dependencies here. Keep this file updated with solver deps.
 pytest
+# Optional cryptography dep for advanced crypto operations (not required for local solver)
+cryptography>=40.0.0
+
 
