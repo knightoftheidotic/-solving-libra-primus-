@@ -14,6 +14,8 @@ from typing import Set
 
 
 URL_RE = re.compile(r"(https?://[\w\-\.\~:/?#\[\]@!$&'()*+,;=%]+|www\.[\w\-\.\~:/?#@!$&'()*+,;=%]+)", re.IGNORECASE)
+# Bare domain pattern (e.g. example.com or sub.example.co.uk)
+DOMAIN_RE = re.compile(r"\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63})\b", re.IGNORECASE)
 
 
 def load_json(path: Path):
@@ -47,11 +49,39 @@ def main():
     out_dir = Path('out')
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    src_files = [Path('out/results.json'), Path('out/merkle_matches.json'), Path('out/merkle_proofs.json')]
+    src_files = [
+        Path('out/results.json'),
+        Path('out/merkle_matches.json'),
+        Path('out/merkle_proofs.json'),
+        Path('out/merkle_root.txt'),
+        Path('inputs/wordlist.txt'),
+        Path('inputs/hashes.txt'),
+    ]
     urls: Set[str] = set()
     for p in src_files:
-        j = load_json(p)
-        urls.update(find_urls_in_obj(j))
+        if not p.exists():
+            continue
+        if p.suffix.lower() in ('.json',):
+            j = load_json(p)
+            urls.update(find_urls_in_obj(j))
+        else:
+            # treat as plain text
+            try:
+                text = p.read_text(encoding='utf-8', errors='ignore')
+            except Exception:
+                continue
+            # find full URLs first
+            for m in URL_RE.findall(text):
+                if m.lower().startswith('www.'):
+                    urls.add('http://' + m)
+                else:
+                    urls.add(m)
+            # find bare domains, avoid matching those already captured
+            for m in DOMAIN_RE.findall(text):
+                if '.' in m:
+                    # normalize to http://
+                    candidate = m if m.lower().startswith('http') else 'http://' + m
+                    urls.add(candidate)
 
     # Save plain list
     urls_txt = out_dir / 'urls.txt'
