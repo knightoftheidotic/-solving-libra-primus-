@@ -14,7 +14,28 @@ Security and legal notes:
 import hmac
 import hashlib
 import os
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# Toggle verbose debug printing. Set in __main__ via --verbose flag or WEBHOOK_VERBOSE env var.
+VERBOSE = False
+DEBUG_LOG_PATH = os.path.join(os.getcwd(), "out", "webhook_debug.log")
+
+
+def debug_log(msg: str):
+    """Write a timestamped debug message to both stdout (when VERBOSE) and to the debug log file."""
+    ts = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+    line = f"[{ts}] {msg}\n"
+    try:
+        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(line)
+    except Exception:
+        pass
+    if VERBOSE:
+        try:
+            print(line, end="")
+        except Exception:
+            pass
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
@@ -49,6 +70,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
         with open(payload_file, "wb") as f:
             f.write(body)
 
+        if VERBOSE:
+            try:
+                debug_log("Received payload (first 1024 bytes): " + repr(body[:1024]))
+            except Exception:
+                pass
+
         # Try to parse JSON payload and extract SHA256-like hashes (safe local operation).
         try:
             import json
@@ -74,6 +101,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 text = body.decode("utf-8", errors="ignore")
 
             hashes = extract_hashes_from_text(text)
+            if VERBOSE:
+                debug_log("Extracted text for parsing (first 1024 chars): " + (text or "")[:1024])
+                debug_log("Found hashes: " + str(hashes))
             if hashes:
                 inputs_dir = os.path.join(os.getcwd(), "inputs")
                 os.makedirs(inputs_dir, exist_ok=True)
@@ -93,7 +123,29 @@ class WebhookHandler(BaseHTTPRequestHandler):
                             fh.write(h + "\n")
                             appended.append(h)
                 if appended:
-                    print(f"Appended {len(appended)} new hash(es) to {hashes_file}: {appended}")
+                    debug_log(f"Appended {len(appended)} new hash(es) to {hashes_file}: {appended}")
+        # Also attempt to extract URLs (including www.*) for debugging and capture
+        try:
+            from tools.parse_urls import extract_urls_from_text
+
+            urls = extract_urls_from_text(text if text is not None else body.decode("utf-8", errors="ignore"))
+            if urls:
+                urls_path = os.path.join(os.getcwd(), "out", "urls.txt")
+                existing_urls = set()
+                if os.path.exists(urls_path):
+                    with open(urls_path, "r", encoding="utf-8", errors="ignore") as uf:
+                        for ln in uf:
+                            existing_urls.add(ln.strip())
+                appended_urls = []
+                with open(urls_path, "a", encoding="utf-8") as uf:
+                    for u in urls:
+                        if u not in existing_urls:
+                            uf.write(u + "\n")
+                            appended_urls.append(u)
+                if appended_urls:
+                    debug_log(f"Appended {len(appended_urls)} URL(s) to {urls_path}: {appended_urls}")
+        except Exception as e:
+            debug_log(f"URL extraction failed: {e}")
         except Exception as e:
             print("Hash extraction failed:", e)
 
@@ -148,6 +200,15 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", "-p", type=int, default=9000)
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose debug output and write debug log to out/webhook_debug.log")
     args = parser.parse_args()
+
+    # Enable VERBOSE if requested on the command line or via WEBHOOK_VERBOSE env var
+    global VERBOSE
+    VERBOSE = args.verbose or os.environ.get("WEBHOOK_VERBOSE", "0").strip() == "1"
+    # Ensure out directory exists so debug log can be created
+    os.makedirs("out", exist_ok=True)
+    if VERBOSE:
+        debug_log("Verbose logging enabled")
 
     run_server(args.port)
